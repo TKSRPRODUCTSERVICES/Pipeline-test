@@ -1,0 +1,24 @@
+pipeline:
+
+
+  name: "world_population_ml_pipeline"
+  description: "Pipeline for training a regression model and logging results to Arize"
+
+  parameters:
+    test_size: 0.3
+    random_state: 42
+    model:
+      type: "LinearRegression"
+
+  steps:
+    load_data:
+      description: "Load dataset from CSV file"
+      file_path: "/Users/puravgupta/Desktop/python/folder/project/project1/streamli_test/arize_demo/world_population1.csv"
+      preprocessing:
+        drop_na: true
+
+
+    preprocessing:
+      description: "Handle missing values and encode categorical features"
+      drop_na: true
+      encoding: "LabelEncoder"
