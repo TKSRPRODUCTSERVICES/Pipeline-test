@@ -1,0 +1,237 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "AWS Service Catalog Product for AWS CodePipeline with IAM Roles"
+
+Resources:
+
+  # Service Catalog Portfolio
+  CICDPortfolio:
+    Type: AWS::ServiceCatalog::Portfolio
+    Properties:
+      DisplayName: "CI/CD Portfolio"
+      ProviderName: "DevOps Team"
+      Description: "Portfolio for AWS CodePipeline deployments"
+
+  # IAM Role for CodePipeline
+  CodePipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 
+                - codepipeline.amazonaws.com
+            Action: "sts:AssumeRole"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSCodePipelineFullAccess
+
+  # IAM Role with EC2 Full Access
+  EC2FullAccessRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 
+                - ec2.amazonaws.com
+            Action: "sts:AssumeRole"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEC2FullAccess
+
+  # IAM Role with S3 Full Access
+  S3FullAccessRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 
+                - ec2.amazonaws.com
+            Action: "sts:AssumeRole"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+
+  # IAM Role for EC2 CodeDeploy Agent
+  EC2CodeDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 
+                - ec2.amazonaws.com
+            Action: "sts:AssumeRole"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEC2RoleforAWSCodeDeploy
+
+  # IAM Role for CodeDeploy Full Access
+  CodeDeployFullAccessRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 
+                - codedeploy.amazonaws.com
+            Action: "sts:AssumeRole"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSCodeDeployFullAccess
+
+  # S3 Bucket for Pipeline Artifacts
+  PipelineArtifactBucket:
+    Type: AWS::S3::Bucket
+
+  # CodeCommit Repository (Source)
+  CodeCommitRepo:
+    Type: AWS::CodeCommit::Repository
+    Properties:
+      RepositoryName: "MyAppRepo"
+      RepositoryDescription: "Source repository for CodePipeline"
+
+  # CodeBuild Project (Build Stage)
+  CodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: "MyAppBuild"
+      Source:
+        Type: CODECOMMIT
+        Location: !GetAtt CodeCommitRepo.CloneUrlHttp
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: "aws/codebuild/standard:5.0"
+        Type: LINUX_CONTAINER
+      ServiceRole: !GetAtt CodePipelineRole.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+
+  # CodeDeploy Application (Deploy Stage)
+  CodeDeployApplication:
+    Type: AWS::CodeDeploy::Application
+    Properties:
+      ApplicationName: "MyAppDeploy"
+
+  # CodeDeploy Deployment Group
+  CodeDeployDeploymentGroup:
+    Type: AWS::CodeDeploy::DeploymentGroup
+    Properties:
+      ApplicationName: !Ref CodeDeployApplication
+      DeploymentGroupName: "MyAppDeploymentGroup"
+      ServiceRoleArn: !GetAtt CodeDeployFullAccessRole.Arn
+      DeploymentConfigName: CodeDeployDefault.AllAtOnce
+      Ec2TagFilters:
+        - Key: "Name"
+          Value: "MyAppEC2Instance"
+          Type: KEY_AND_VALUE
+
+  # CodePipeline
+  CodePipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: "MyAppPipeline"
+      RoleArn: !GetAtt CodePipelineRole.Arn
+      ArtifactStore:
+        Type: S3
+        Location: !Ref PipelineArtifactBucket
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: SourceAction
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: CodeCommit
+                Version: "1"
+              OutputArtifacts:
+                - Name: SourceOutput
+              Configuration:
+                RepositoryName: !Ref CodeCommitRepo
+                BranchName: "main"
+              RunOrder: 1
+
+        - Name: Build
+          Actions:
+            - Name: BuildAction
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: "1"
+              InputArtifacts:
+                - Name: SourceOutput
+              OutputArtifacts:
+                - Name: BuildOutput
+              Configuration:
+                ProjectName: !Ref CodeBuildProject
+              RunOrder: 1
+
+        - Name: Deploy
+          Actions:
+            - Name: DeployAction
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: CodeDeploy
+                Version: "1"
+              InputArtifacts:
+                - Name: BuildOutput
+              Configuration:
+                ApplicationName: !Ref CodeDeployApplication
+                DeploymentGroupName: !Ref CodeDeployDeploymentGroup
+              RunOrder: 1
+
+  # Service Catalog Product for CodePipeline
+  CodePipelineProduct:
+    Type: AWS::ServiceCatalog::CloudFormationProduct
+    Properties:
+      Name: "AWS CodePipeline Product"
+      Owner: "DevOps Team"
+      Description: "Service Catalog Product for AWS CodePipeline"
+      ProvisioningArtifactParameters:
+        - Name: "v1"
+          Description: "Initial version"
+          Info:
+            LoadTemplateFromURL: "https://s3.amazonaws.com/my-bucket/codepipeline-template.yml"
+
+  # Add Product to Portfolio
+  PortfolioProductAssociation:
+    Type: AWS::ServiceCatalog::PortfolioProductAssociation
+    Properties:
+      PortfolioId: !Ref CICDPortfolio
+      ProductId: !Ref CodePipelineProduct
+
+  # Grant IAM Access to Portfolio Users
+  PortfolioUserAccess:
+    Type: AWS::ServiceCatalog::PortfolioPrincipalAssociation
+    Properties:
+      PortfolioId: !Ref CICDPortfolio
+      PrincipalARN: "arn:aws:iam::123456789012:role/DeveloperRole"
+      PrincipalType: IAM
+
+Outputs:
+  PortfolioId:
+    Description: "AWS Service Catalog Portfolio ID"
+    Value: !Ref CICDPortfolio
+  CodePipelineProductId:
+    Description: "AWS Service Catalog Product ID for CodePipeline"
+    Value: !Ref CodePipelineProduct
+  EC2FullAccessRoleArn:
+    Description: "IAM Role ARN with EC2 Full Access"
+    Value: !GetAtt EC2FullAccessRole.Arn
+  S3FullAccessRoleArn:
+    Description: "IAM Role ARN with S3 Full Access"
+    Value: !GetAtt S3FullAccessRole.Arn
+  EC2CodeDeployRoleArn:
+    Description: "IAM Role ARN with EC2 CodeDeploy Access"
+    Value: !GetAtt EC2CodeDeployRole.Arn
+  CodeDeployFullAccessRoleArn:
+    Description: "IAM Role ARN with CodeDeploy Full Access"
+    Value: !GetAtt CodeDeployFullAccessRole.Arn
